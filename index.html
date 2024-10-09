@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Futuristic World Map</title>
+    <style>
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: #000;
+        font-family: Arial, sans-serif;
+      }
+      #map-container {
+        width: 100%;
+        height: 100%;
+        position: relative;
+      }
+      #world-map {
+        width: 100%;
+        height: 100%;
+      }
+      .country {
+        fill: #1a1a1a;
+        stroke: #4a4a4a;
+        stroke-width: 0.5;
+      }
+      .continent-glow {
+        fill: none;
+        stroke: #00a8ff;
+        stroke-width: 1;
+        filter: url(#glow-effect);
+      }
+      .grid-line {
+        stroke: #333;
+        stroke-width: 0.2;
+      }
+      .bullet,
+      .bullet-glow {
+        cursor: pointer;
+      }
+      .callout {
+        fill: rgba(50, 50, 50, 0.8);
+        stroke: #fff;
+        stroke-width: 1;
+      }
+      .callout-text,
+      .callout-link {
+        fill: #fff;
+        font-size: 12px;
+      }
+      .callout-link {
+        fill: #00ffff;
+        cursor: pointer;
+      }
+      #public-reports-link {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background-color: rgba(0, 168, 255, 0.2);
+        color: #fff;
+        padding: 10px 20px;
+        text-decoration: none;
+        border-radius: 5px;
+        font-size: 14px;
+        transition: background-color 0.3s;
+        z-index: 1000;
+      }
+      #public-reports-link:hover {
+        background-color: rgba(0, 168, 255, 0.4);
+      }
+      #legends-box {
+        position: fixed;
+        left: 10px;
+        bottom: 40px;
+        background-color: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        padding: 10px 10px 5px 10px;
+        opacity: 0.7;
+        z-index: 1000;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+      }
+      .legend-checkbox {
+        width: 16px;
+        height: 16px;
+        margin-right: 10px;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        border: 2px solid;
+        border-radius: 3px;
+        outline: none;
+        cursor: pointer;
+        position: relative;
+      }
+      .legend-checkbox:checked::before {
+        content: "\2714";
+        display: block;
+        text-align: center;
+        color: white;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 12px;
+      }
+      .legend-text {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 12px;
+      }
+      #organization-name {
+        position: fixed;
+        left: 10px;
+        bottom: 10px;
+        color: #00a8ff;
+        font-size: 14px;
+        text-shadow: 0 0 5px #00a8ff, 0 0 10px #00a8ff;
+        z-index: 1000;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map-container">
+      <svg id="world-map" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <filter id="glow-effect" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur" />
+            <feComposite in="blur" in2="SourceGraphic" operator="over" />
+          </filter>
+        </defs>
+
+        <g id="map-layers">
+          <g id="grid-lines"></g>
+          <g id="countries"></g>
+          <g id="continent-glow"></g>
+          <g id="bullets"></g>
+        </g>
+      </svg>
+      <div id="legends-box"></div>
+      <div id="organization-name">
+        The International Centre for Development Studies
+      </div>
+    </div>
+
+    <a href="#" id="public-reports-link">Public Reports</a>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+    <script>
+      // Disable zooming
+      function disableZoom(e) {
+        e.preventDefault();
+      }
+
+      document.addEventListener("wheel", disableZoom, { passive: false });
+      document.addEventListener("touchmove", disableZoom, { passive: false });
+
+      document.addEventListener("keydown", function (e) {
+        if (
+          (e.ctrlKey || e.metaKey) &&
+          (e.key === "+" || e.key === "-" || e.key === "0")
+        ) {
+          e.preventDefault();
+        }
+      });
+
+      // Prevent browser zoom
+      document.body.style.zoom = 1;
+
+      window.addEventListener("resize", function () {
+        document.body.style.zoom = 1;
+      });
+
+      const svg = d3.select("#world-map");
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      svg.attr("viewBox", `0 0 ${width} ${height}`);
+
+      const projection = d3
+        .geoMercator()
+        .scale(width / 2 / Math.PI)
+        .translate([width / 2, height / 1.5]);
+
+      const path = d3.geoPath().projection(projection);
+
+      const jsonCategories = {
+        economy: "#ff0000",
+        technology: "#00ff00",
+        "Security & Politics": "#ffff00",
+      };
+
+      const jsonCountries = {
+        afghanistan: [65, 33],
+        albania: [20, 41],
+        algeria: [3, 28],
+        andorra: [1.5, 42.5],
+        angola: [18, -12.5],
+        antiguaAndBarbuda: [-61.8, 17.1],
+        argentina: [-64, -34],
+        armenia: [45, 40],
+        australia: [133, -25],
+        austria: [13.3, 47.3],
+        azerbaijan: [47.5, 40.5],
+        bahamas: [-77.4, 25.0],
+        bahrain: [50.5, 26],
+        bangladesh: [90, 24],
+        barbados: [-59.5, 13.2],
+        belarus: [28, 53],
+        belgium: [4.5, 50.5],
+        belize: [-88.5, 17.2],
+        benin: [2.3, 9.3],
+        bhutan: [90.5, 27.5],
+        bolivia: [-65, -17],
+        bosniaAndHerzegovina: [18, 44],
+        botswana: [24, -22],
+        brazil: [-55, -10],
+        brunei: [114.7, 4.5],
+        bulgaria: [25.5, 42.7],
+        burkinaFaso: [-2, 13],
+        burundi: [30, -3.5],
+        cambodia: [105, 13],
+        cameroon: [12, 6],
+        canada: [-106, 56],
+        capeVerde: [-24, 16],
+        centralAfricanRepublic: [20, 7],
+        chad: [19, 15],
+        chile: [-71, -30],
+        china: [104, 35],
+        colombia: [-72, 4],
+        comoros: [43.2, -11.7],
+        congo: [15, -1],
+        costaRica: [-84, 10],
+        coteDIvoire: [-5.5, 8],
+        croatia: [15.5, 45.2],
+        cuba: [-79.5, 21.5],
+        cyprus: [33, 35],
+        czechRepublic: [15.5, 49.7],
+        democraticRepublicOfCongo: [23, -2.5],
+        denmark: [9.5, 56],
+        djibouti: [43, 11.5],
+        dominica: [-61.4, 15.4],
+        dominicanRepublic: [-70.7, 19],
+        eastTimor: [125.7, -8.8],
+        ecuador: [-78.5, -1.5],
+        egypt: [30, 27],
+        elSalvador: [-88.9, 13.8],
+        equatorialGuinea: [10.3, 1.7],
+        eritrea: [39, 15],
+        estonia: [25, 59],
+        eswatini: [31.5, -26.5],
+        ethiopia: [40, 8],
+        fiji: [178, -18],
+        finland: [26, 64],
+        france: [2, 46],
+        gabon: [11.7, -0.8],
+        gambia: [-15.5, 13.5],
+        georgia: [43.5, 42],
+        germany: [10, 51],
+        ghana: [-1, 8],
+        greece: [22, 39],
+        grenada: [-61.7, 12.1],
+        guatemala: [-90.5, 15.5],
+        guinea: [-10, 11],
+        guineaBissau: [-15, 12],
+        guyana: [-59, 5],
+        haiti: [-72.7, 19],
+        honduras: [-86.5, 15],
+        hungary: [19.5, 47],
+        iceland: [-18, 65],
+        india: [78, 22],
+        indonesia: [120, -5],
+        iran: [53, 32],
+        iraq: [44, 33],
+        ireland: [-8, 53],
+        israel: [34.8, 31.5],
+        italy: [12, 43],
+        jamaica: [-77.3, 18.2],
+        japan: [138, 36],
+        jordan: [36, 31],
+        kazakhstan: [68, 48],
+        kenya: [38, 1],
+        kiribati: [-157, 1.4],
+        kuwait: [47.6, 29.3],
+        kyrgyzstan: [75, 41],
+        laos: [105, 18],
+        latvia: [25, 57],
+        lebanon: [35.8, 33.8],
+        lesotho: [28.2, -29.5],
+        liberia: [-9.5, 6.5],
+        libya: [17, 27],
+        liechtenstein: [9.5, 47.2],
+        lithuania: [24, 56],
+        luxembourg: [6.1, 49.8],
+        madagascar: [47, -20],
+        malawi: [34, -13.5],
+        malaysia: [112.5, 2.5],
+        maldives: [73.2, 3.2],
+        mali: [-4, 17],
+        malta: [14.4, 35.9],
+        marshallIslands: [168, 9],
+        mauritania: [-12, 20],
+        mauritius: [57.5, -20.2],
+        mexico: [-102, 23],
+        micronesia: [158.2, 6.9],
+        moldova: [28.9, 47.4],
+        monaco: [7.4, 43.7],
+        mongolia: [105, 46],
+        montenegro: [19.3, 42.7],
+        morocco: [-5, 32],
+        mozambique: [35, -18.2],
+        myanmar: [96, 22],
+        namibia: [17, -22],
+        nauru: [166.9, -0.5],
+        nepal: [84, 28],
+        netherlands: [5.3, 52.1],
+        newZealand: [174, -41],
+        nicaragua: [-85, 13],
+        niger: [8, 16],
+        nigeria: [8, 9],
+        northKorea: [127.5, 40],
+        northMacedonia: [21.7, 41.6],
+        norway: [8.5, 62],
+        oman: [57, 21],
+        pakistan: [69, 30],
+        palau: [134.5, 7.5],
+        palestine: [35.2, 31.9],
+        panama: [-80, 9],
+        papuaNewGuinea: [147, -6],
+        paraguay: [-58, -23],
+        peru: [-76, -10],
+        philippines: [122, 13],
+        poland: [20, 52],
+        portugal: [-8, 39.5],
+        qatar: [51.2, 25.3],
+        romania: [25, 46],
+        russia: [105, 62],
+        rwanda: [30, -2],
+        saintKittsAndNevis: [-62.7, 17.3],
+        saintLucia: [-61, 13.9],
+        saintVincentAndTheGrenadines: [-61.2, 13.3],
+        samoa: [-172.1, -13.6],
+        sanMarino: [12.5, 43.9],
+        saoTomeAndPrincipe: [6.6, 0.3],
+        saudiArabia: [45, 25],
+        senegal: [-14, 14],
+        serbia: [21, 44],
+        seychelles: [55.5, -4.6],
+        sierraLeone: [-11.8, 8.5],
+        singapore: [103.8, 1.4],
+        slovakia: [19.5, 48.7],
+        slovenia: [15, 46],
+        solomonIslands: [160, -8],
+        somalia: [48, 6],
+        southAfrica: [24, -29],
+        southKorea: [128, 36],
+        southSudan: [30, 7],
+        spain: [-4, 40],
+        sriLanka: [81, 7],
+        sudan: [30, 15],
+        suriname: [-56, 4],
+        sweden: [15, 62],
+        switzerland: [8, 47],
+        syria: [38, 35],
+        taiwan: [121, 23.5],
+        tajikistan: [71, 39],
+        tanzania: [35, -6],
+        thailand: [101, 15],
+        togo: [1.1, 8.6],
+        tonga: [-175, -20],
+        trinidadAndTobago: [-61, 10.5],
+        tunisia: [9, 34],
+        turkey: [35, 39],
+        turkmenistan: [59, 40],
+        tuvalu: [178, -8],
+        uganda: [32, 1],
+        ukraine: [32, 49],
+        unitedArabEmirates: [54, 24],
+        unitedKingdom: [-2, 54],
+        unitedStates: [-98, 39.5],
+        uruguay: [-56, -33],
+        uzbekistan: [64, 41],
+        vanuatu: [167, -16],
+        vaticanCity: [12.5, 41.9],
+        venezuela: [-66, 8],
+        vietnam: [106, 16],
+        yemen: [47, 15],
+        zambia: [28, -14],
+        zimbabwe: [30, -19],
+      };
+
+      const jsonData = [
+        {
+          country: "unitedStates",
+          category: "economy",
+          callout: "US Economic Data\nGDP Growth: 2.3%\nInflation Rate: 1.8%",
+          link: "https://example.com/us-economy",
+          expiryDate: "2024-12-31T23:59:59Z",
+        },
+        {
+          country: "china",
+          category: "technology",
+          callout:
+            "China Trade Statistics\nExports: $2.5 trillion\nImports: $2.1 trillion",
+          link: "https://example.com/china-trade",
+          expiryDate: "2024-12-31T23:59:59Z",
+        },
+        {
+          country: "russia",
+          category: "Security & Politics",
+          callout:
+            "Russia Energy Report\nOil Production: 10.6M bbl/day\nNatural Gas: 679B cubic meters",
+          link: "https://example.com/russia-energy",
+          expiryDate: "2024-12-31T23:59:59Z",
+        },
+        {
+          country: "unitedStates",
+          category: "Security & Politics",
+          callout: "US Defense Budget\nTotal: $778 billion\nR&D: $112 billion",
+          link: "https://example.com/us-defense",
+          expiryDate: "2024-12-31T23:59:59Z",
+        },
+        {
+          country: "germany",
+          category: "technology",
+          callout:
+            "German Technology Budget\nTotal: $778 billion\nR&D: $112 billion",
+          link: "https://example.com/german-tech",
+          expiryDate: "2024-12-31T23:59:59Z",
+        },
+      ];
+
+      // Create legend checkboxes
+      const legendsBox = d3.select("#legends-box");
+      Object.entries(jsonCategories).forEach(([category, color]) => {
+        const legendItem = legendsBox
+          .append("div")
+          .attr("class", "legend-item");
+
+        legendItem
+          .append("input")
+          .attr("type", "checkbox")
+          .attr("id", `checkbox-${category}`)
+          .attr("class", "legend-checkbox")
+          .style("border-color", color)
+          .property("checked", true)
+          .on("change", updateBulletVisibility);
+
+        legendItem
+          .append("label")
+          .attr("for", `checkbox-${category}`)
+          .attr("class", "legend-text")
+          .text(category.charAt(0).toUpperCase() + category.slice(1));
+      });
+
+      function updateBulletVisibility() {
+        const visibleCategories = Object.keys(jsonCategories).filter(
+          (category) => document.getElementById(`checkbox-${category}`).checked
+        );
+
+        svg.selectAll(".bullet").each(function (d) {
+          const bullet = d3.select(this);
+          const isVisible = visibleCategories.includes(d.category);
+          bullet.style("display", isVisible ? null : "none");
+        });
+      }
+
+      d3.json(
+        "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json"
+      ).then(function (world) {
+        const countries = topojson.feature(world, world.objects.countries);
+        const continents = topojson.feature(world, world.objects.land);
+
+        // Draw countries
+        svg
+          .select("#countries")
+          .selectAll("path")
+          .data(countries.features)
+          .enter()
+          .append("path")
+          .attr("class", "country")
+          .attr("d", path);
+
+        // Draw grid lines
+        const gridLines = svg.select("#grid-lines");
+        for (let i = -180; i <= 180; i += 30) {
+          gridLines
+            .append("path")
+            .datum({
+              type: "LineString",
+              coordinates: [
+                [i, -80],
+                [i, 80],
+              ],
+            })
+            .attr("class", "grid-line")
+            .attr("d", path);
+        }
+        for (let i = -80; i <= 80; i += 30) {
+          gridLines
+            .append("path")
+            .datum({
+              type: "LineString",
+              coordinates: [
+                [-180, i],
+                [180, i],
+              ],
+            })
+            .attr("class", "grid-line")
+            .attr("d", path);
+        }
+
+        // Create continent glow
+        const continentGlow = svg
+          .select("#continent-glow")
+          .selectAll("path")
+          .data(continents.features)
+          .enter()
+          .append("path")
+          .attr("class", "continent-glow")
+          .attr("d", path);
+
+        // Animate continent glow
+        function pulseGlow() {
+          continentGlow
+            .transition()
+            .duration(2000)
+            .style("opacity", 0.8)
+            .transition()
+            .duration(2000)
+            .style("opacity", 0.2)
+            .on("end", pulseGlow);
+        }
+        pulseGlow();
+
+        // Group bullets by country
+        const groupedBullets = d3.group(jsonData, (d) => d.country);
+
+        // Position and animate bullets
+        const bulletGroups = svg
+          .select("#bullets")
+          .selectAll("g")
+          .data(Array.from(groupedBullets))
+          .enter()
+          .append("g")
+          .attr("class", "bullet-group");
+
+        bulletGroups.each(function ([country, bullets]) {
+          const g = d3.select(this);
+          const [x, y] = projection(jsonCountries[country]);
+
+          bullets.forEach((bullet, index) => {
+            const bulletG = g.append("g").datum(bullet).attr("class", "bullet");
+
+            const angle = ((2 * Math.PI) / bullets.length) * index;
+            const offsetX = x + Math.cos(angle) * 5;
+            const offsetY = y + Math.sin(angle) * 5;
+
+            bulletG
+              .append("circle")
+              .attr("class", "bullet")
+              .attr("cx", offsetX)
+              .attr("cy", offsetY)
+              .attr("r", 5)
+              .style("fill", jsonCategories[bullet.category]);
+
+            glowBullet(bulletG.select(".bullet").node());
+
+            // Add callout
+            const callout = bulletG
+              .append("g")
+              .attr("class", "callout-group")
+              .style("opacity", 0)
+              .style("pointer-events", "none");
+
+            // Create a path for the callout with curved corners and a pointer to the bullet
+            const calloutPath = d3.path();
+            calloutPath.moveTo(offsetX, offsetY - 10);
+            calloutPath.lineTo(offsetX - 10, offsetY - 20);
+            calloutPath.arcTo(
+              offsetX - 100,
+              offsetY - 20,
+              offsetX - 100,
+              offsetY - 25,
+              5
+            );
+            calloutPath.lineTo(offsetX - 100, offsetY - 95);
+            calloutPath.arcTo(
+              offsetX - 100,
+              offsetY - 100,
+              offsetX - 95,
+              offsetY - 100,
+              5
+            );
+            calloutPath.lineTo(offsetX + 75, offsetY - 100);
+            calloutPath.arcTo(
+              offsetX + 80,
+              offsetY - 100,
+              offsetX + 80,
+              offsetY - 95,
+              5
+            );
+            calloutPath.lineTo(offsetX + 80, offsetY - 25);
+            calloutPath.arcTo(
+              offsetX + 80,
+              offsetY - 20,
+              offsetX + 75,
+              offsetY - 20,
+              5
+            );
+            calloutPath.lineTo(offsetX + 10, offsetY - 20);
+            calloutPath.closePath();
+
+            callout
+              .append("path")
+              .attr("class", "callout")
+              .attr("d", calloutPath.toString());
+
+            const calloutText = callout
+              .append("text")
+              .attr("class", "callout-text")
+              .attr("x", offsetX - 90)
+              .attr("y", offsetY - 85);
+
+            bullet.callout.split("\n").forEach((line, i) => {
+              calloutText
+                .append("tspan")
+                .attr("x", offsetX - 90)
+                .attr("dy", i ? "1.5em" : 0)
+                .text(line);
+            });
+
+            calloutText
+              .append("tspan")
+              .attr("class", "callout-link")
+              .attr("x", offsetX - 90)
+              .attr("dy", "2em")
+              .text("more...")
+              .on("click", () => window.open(bullet.link, "_blank"));
+
+            // Hover effects
+            bulletG
+              .on("mouseover", function () {
+                if (isVisible(d3.select(this)) && !isExpired(bullet)) {
+                  showCallout(callout);
+                }
+              })
+              .on("mouseout", function () {
+                hideCalloutIfNotHovered(callout);
+              });
+
+            callout
+              .on("mouseover", function () {
+                d3.select(this).interrupt();
+                d3.select(this).style("opacity", 1);
+              })
+              .on("mouseout", function () {
+                hideCalloutIfNotHovered(d3.select(this));
+              });
+          });
+        });
+
+        function glowBullet(element) {
+          d3.select(element)
+            .transition()
+            .duration(1000)
+            .attr("r", 7)
+            .style("opacity", 0.8)
+            .transition()
+            .duration(1000)
+            .attr("r", 5)
+            .style("opacity", 1)
+            .on("end", function () {
+              glowBullet(this);
+            });
+        }
+
+        function showCallout(callout) {
+          callout
+            .raise() // Bring the callout to the top
+            .transition()
+            .duration(200)
+            .style("opacity", 1)
+            .style("pointer-events", "all");
+        }
+
+        function hideCalloutIfNotHovered(callout) {
+          callout
+            .transition()
+            .duration(200)
+            .style("opacity", 0)
+            .style("pointer-events", "none")
+            .on("end", function () {
+              if (d3.select(this).style("opacity") == 0) {
+                d3.select(this).style("pointer-events", "none");
+              }
+            });
+        }
+
+        function isVisible(selection) {
+          return selection.style("display") !== "none";
+        }
+
+        function isExpired(bullet) {
+          const now = new Date();
+          const expiryDate = new Date(bullet.expiryDate);
+          return now > expiryDate;
+        }
+
+        // Update bullet and callout visibility based on expiry date
+        function updateBulletVisibility() {
+          svg.selectAll(".bullet").each(function (d) {
+            const bullet = d3.select(this);
+            const callout = bullet.select(".callout-group");
+            const isExpiredBullet = isExpired(d);
+
+            bullet.style("display", isExpiredBullet ? "none" : null);
+            callout.style("display", isExpiredBullet ? "none" : null);
+          });
+        }
+
+        // Initial update and set interval for continuous updates
+        updateBulletVisibility();
+        setInterval(updateBulletVisibility, 60000); // Check every minute
+      });
+
+      // Resize map on window resize
+      window.addEventListener("resize", function () {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        svg.attr("viewBox", `0 0 ${width} ${height}`);
+        projection
+          .scale(width / 2 / Math.PI)
+          .translate([width / 2, height / 1.5]);
+        svg.selectAll("path").attr("d", path);
+
+        // Update bullet and callout positions
+        svg.selectAll(".bullet-group").each(function (d) {
+          const g = d3.select(this);
+          const [country, bullets] = d;
+          const [x, y] = projection(jsonCountries[country]);
+
+          bullets.forEach((bullet, index) => {
+            const bulletG = g.select(`.bullet:nth-child(${index + 1})`);
+
+            const angle = ((2 * Math.PI) / bullets.length) * index;
+            const offsetX = x + Math.cos(angle) * 5;
+            const offsetY = y + Math.sin(angle) * 5;
+
+            bulletG.select(".bullet").attr("cx", offsetX).attr("cy", offsetY);
+
+            const callout = bulletG.select(".callout-group");
+            const calloutPath = d3.path();
+            calloutPath.moveTo(offsetX, offsetY - 10);
+            calloutPath.lineTo(offsetX - 10, offsetY - 20);
+            calloutPath.arcTo(
+              offsetX - 100,
+              offsetY - 20,
+              offsetX - 100,
+              offsetY - 25,
+              5
+            );
+            calloutPath.lineTo(offsetX - 100, offsetY - 95);
+            calloutPath.arcTo(
+              offsetX - 100,
+              offsetY - 100,
+              offsetX - 95,
+              offsetY - 100,
+              5
+            );
+            calloutPath.lineTo(offsetX + 75, offsetY - 100);
+            calloutPath.arcTo(
+              offsetX + 80,
+              offsetY - 100,
+              offsetX + 80,
+              offsetY - 95,
+              5
+            );
+            calloutPath.lineTo(offsetX + 80, offsetY - 25);
+            calloutPath.arcTo(
+              offsetX + 80,
+              offsetY - 20,
+              offsetX + 75,
+              offsetY - 20,
+              5
+            );
+            calloutPath.lineTo(offsetX + 10, offsetY - 20);
+            calloutPath.closePath();
+
+            callout.select("path").attr("d", calloutPath.toString());
+            callout
+              .select(".callout-text")
+              .attr("x", offsetX - 90)
+              .attr("y", offsetY - 85);
+            callout.selectAll("tspan").attr("x", offsetX - 90);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
